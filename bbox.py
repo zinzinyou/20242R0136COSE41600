@@ -7,8 +7,8 @@ from tqdm import tqdm
 
 # pcd 파일 불러오기, 필요에 맞게 경로 수정
 scenario = "01_straight_walk"
-# scenario = "02_straight_duck_walk"
-# scenario = "03_straight_crawl"
+scenario = "02_straight_duck_walk"
+scenario = "03_straight_crawl"
 # scenario = "04_zigzag_walk"
 # scenario = "05_straight_duck_walk"
 # scenario = "06_straight_crawl"
@@ -87,6 +87,10 @@ merged_pcd = o3d.geometry.PointCloud()
 clusters = [] 
 all_bbox = []
 
+min_bbox_xy = np.array([0.2, 0.2])
+max_bbox_xy = np.array([2, 2,])
+
+
 
 # pcd 파일 연속적으로 불러오기
 for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
@@ -110,14 +114,13 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
 
         if len(moving_pcd.points)>0:
             # Dynamic Filtering 기반 파라미터 설정
-            # eps  = dynamic_parameters(moving_pcd)
+            eps  = dynamic_parameters(moving_pcd)
             # print(f"Frame {idx}: Dynamic eps={eps:.3f}")
 
-            # 움직이는 point들을 대상으로 DBSCAN 클러스터링 적용
+            # 움직이는 point들만 대상으로 DBSCAN 클러스터링 적용
             # with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
             # labels = np.array(moving_pcd.cluster_dbscan(eps=eps, min_points=10, print_progress=False))
-
-            labels = np.array(moving_pcd.cluster_dbscan(eps=0.3, min_points=10, print_progress=False))
+            labels = np.array(moving_pcd.cluster_dbscan(eps=0.4, min_points=5, print_progress=False))
 
             # 시각화 결과에서 노이즈 제거
             valid_indices = labels >= 0
@@ -128,6 +131,7 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
             moving_pcd = moving_pcd.select_by_index(np.where(valid_indices)[0])
             labels = labels[valid_indices]  # 노이즈 제외 후 라벨 갱신
 
+            # cluster 개수 계산
             num_cluster = labels.max()+1
             clusters.append(num_cluster)
 
@@ -144,26 +148,41 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
             merged_pcd += moving_pcd
 
             # 필터링 기준 설정
-            min_points_in_cluster = 10   # 클러스터 내 최소 포인트 수
+            min_points_in_cluster = 5   # 클러스터 내 최소 포인트 수
             max_points_in_cluster = 100  # 클러스터 내 최대 포인트 수
             min_z_value = -1.0          # 클러스터 내 최소 Z값
-            max_z_value = 5.0           # 클러스터 내 최대 Z값
-            min_height = 0.2            # Z값 차이의 최소값
+            max_z_value = 2.5           # 클러스터 내 최대 Z값
+            min_height = 0.4            # Z값 차이의 최소값
             max_height = 2.5            # Z값 차이의 최대값
-            max_distance = 50.0         # 원점으로부터의 최대 거리
+            max_distance = 40.0         # 원점으로부터의 최대 거리
 
-            # 1번, 2번, 3번 조건을 모두 만족하는 클러스터 필터링 및 바운딩 박스 생성
+            # X, Y 필터링 기준 추가
+            min_width = 0.2           # X 최소값
+            max_width = 1.0            # X 최대값
+            min_depth = 0.2           # Y 최소값
+            max_depth = 1.0            # Y 최대값
+
+            # 클러스터 필터링 및 바운딩 박스 생성
             for i in range(num_cluster):
                 cluster_indices = np.where(labels == i)[0]
                 if min_points_in_cluster <= len(cluster_indices) <= max_points_in_cluster:
                     cluster_pcd = moving_pcd.select_by_index(cluster_indices)
                     points = np.asarray(cluster_pcd.points)
+                    x_values = points[:,0]
+                    y_values = points[:,1]
                     z_values = points[:, 2]
-                    z_min = z_values.min()
-                    z_max = z_values.max()
+
+                    x_min, x_max = x_values.min(), x_values.max()
+                    y_min, y_max = y_values.min(), y_values.max()
+                    z_min, z_max = z_values.min(), z_values.max()
+
                     if min_z_value <= z_min and z_max <= max_z_value:
+                        width_diff = x_max - x_min
+                        depth_diff = y_max - y_min
                         height_diff = z_max - z_min
-                        if min_height <= height_diff <= max_height:
+                        if (min_height <= height_diff <= max_height and
+                            min_width <= width_diff <= max_width and
+                            min_depth <= depth_diff <= max_depth):
                             distances = np.linalg.norm(points, axis=1)
                             if distances.max() <= max_distance:
                                 bbox = cluster_pcd.get_axis_aligned_bounding_box()
@@ -174,5 +193,4 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
 
 # 통합 결과 시각화
 visualize_with_bounding_boxes(merged_pcd, all_bbox, window_name="Moving Objects", point_size=1.5)
-# o3d.visualization.draw_geometries([merged_pcd], window_name="Merged Clusters")
 print("average number of clusters:",np.mean(clusters))
