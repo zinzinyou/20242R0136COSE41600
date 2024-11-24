@@ -60,6 +60,16 @@ def get_moving_objects(pcd_prev, pcd_curr, threshold):
     return moving_pcd
 
 
+def dynamic_parameters(moving_pcd, default_eps=0.2, factor=3.5):
+    # 평균 거리 기반 eps 계산
+    if len(moving_pcd.points) > 0:
+        dists = moving_pcd.compute_nearest_neighbor_distance()
+        mean_dist = np.mean(dists)
+        eps = mean_dist * factor
+    else:
+        eps = default_eps
+    return eps
+
 # 포인트 클라우드 및 바운딩 박스를 시각화하는 함수
 def visualize_with_bounding_boxes(pcd, bounding_boxes, window_name="Filtered Clusters and Bounding Boxes", point_size=1.0):
     vis = o3d.visualization.Visualizer()
@@ -90,31 +100,44 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
         # 이전 pcd와 비교하여 움직이는 point 탐지
         moving_pcd = get_moving_objects(prev_pcd, curr_pcd, threshold=0.2)
 
-        # 포인트 개수 비교
-        total_points = len(curr_pcd.points)
-        moving_points = len(moving_pcd.points)
-        moving_ratio = (moving_points / total_points) * 100 if total_points > 0 else 0
-        print(f"Frame {idx}:")
-        print(f"  Total points: {total_points}")
-        print(f"  Moving points: {moving_points} ({moving_ratio:.2f}%)")
+        # # 포인트 개수 비교
+        # total_points = len(curr_pcd.points)
+        # moving_points = len(moving_pcd.points)
+        # moving_ratio = (moving_points / total_points) * 100 if total_points > 0 else 0
+        # print(f"Frame {idx}:")
+        # print(f"  Total points: {total_points}")
+        # print(f"  Moving points: {moving_points} ({moving_ratio:.2f}%)")
 
         if len(moving_pcd.points)>0:
+            # Dynamic Filtering 기반 파라미터 설정
+            # eps  = dynamic_parameters(moving_pcd)
+            # print(f"Frame {idx}: Dynamic eps={eps:.3f}")
+
             # 움직이는 point들을 대상으로 DBSCAN 클러스터링 적용
             # with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
-            labels = np.array(moving_pcd.cluster_dbscan(eps=0.35, min_points=10, print_progress=False))
+            # labels = np.array(moving_pcd.cluster_dbscan(eps=eps, min_points=10, print_progress=False))
+
+            labels = np.array(moving_pcd.cluster_dbscan(eps=0.3, min_points=10, print_progress=False))
+
+            # 시각화 결과에서 노이즈 제거
+            valid_indices = labels >= 0
+            if np.sum(valid_indices) == 0:
+                print(f"Frame {idx}: No valid clusters found.")
+                prev_pcd = curr_pcd
+                continue
+            moving_pcd = moving_pcd.select_by_index(np.where(valid_indices)[0])
+            labels = labels[valid_indices]  # 노이즈 제외 후 라벨 갱신
 
             num_cluster = labels.max()+1
             clusters.append(num_cluster)
 
             # 각 cluster에 고유 색상 할당
-            max_label = labels.max()
+            max_label = num_cluster-1
             cmap = plt.get_cmap("tab20")  
             colors = np.zeros((len(labels), 3))  # 기본 검정색
             for i in range(max_label + 1):
                 cluster_color = cmap(i / (max_label if max_label > 0 else 1))[:3]  # RGB 값만 추출
                 colors[labels == i] = cluster_color
-            colors[labels < 0] = [0, 0, 0]  # 노이즈는 검정색
-
             moving_pcd.colors = o3d.utility.Vector3dVector(colors)
 
             # 통합 PointCloud에 추가
@@ -125,12 +148,12 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
             max_points_in_cluster = 100  # 클러스터 내 최대 포인트 수
             min_z_value = -1.0          # 클러스터 내 최소 Z값
             max_z_value = 5.0           # 클러스터 내 최대 Z값
-            min_height = 0.5            # Z값 차이의 최소값
-            max_height = 3.0            # Z값 차이의 최대값
+            min_height = 0.2            # Z값 차이의 최소값
+            max_height = 2.5            # Z값 차이의 최대값
             max_distance = 50.0         # 원점으로부터의 최대 거리
 
             # 1번, 2번, 3번 조건을 모두 만족하는 클러스터 필터링 및 바운딩 박스 생성
-            for i in range(labels.max() + 1):
+            for i in range(num_cluster):
                 cluster_indices = np.where(labels == i)[0]
                 if min_points_in_cluster <= len(cluster_indices) <= max_points_in_cluster:
                     cluster_pcd = moving_pcd.select_by_index(cluster_indices)
