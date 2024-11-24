@@ -6,32 +6,39 @@ import os
 from tqdm import tqdm
 import cv2
 
-# 시각화 프레임 저장 경로
-output_dir = "./output_frames/"
-os.makedirs(output_dir, exist_ok=True)
-
-# 동영상 저장 경로
-output_video = "./output_video/scenario_video.mp4"
-os.makedirs(os.path.dirname(output_video), exist_ok=True)
 
 # pcd 파일 불러오기, 필요에 맞게 경로 수정
 scenario = "01_straight_walk"
-# scenario = "02_straight_duck_walk"
-# scenario = "03_straight_crawl"
-# scenario = "04_zigzag_walk"
-# scenario = "05_straight_duck_walk"
-# scenario = "06_straight_crawl"
-# scenario = "07_straight_walk"
+scenario = "02_straight_duck_walk"
+scenario = "03_straight_crawl"
+scenario = "04_zigzag_walk"
+scenario = "05_straight_duck_walk"
+scenario = "06_straight_crawl"
+scenario = "07_straight_walk"
 pcd_dir = f"./data/{scenario}/pcd/"
 pcd_files = sorted([os.path.join(pcd_dir, f) for f in os.listdir(pcd_dir) if f.endswith(".pcd")])
+
+# 모든 PCD 파일 로드
+print("Loading PCD files...")
+pcd_list = [o3d.io.read_point_cloud(file) for file in tqdm(pcd_files)]
+
+
+# 시각화 프레임 저장 경로
+output_dir = f"./output_frames/{scenario}/"
+os.makedirs(output_dir, exist_ok=True)
+
+# 동영상 저장 경로
+output_video = f"./output_video/{scenario}.mp4"
+os.makedirs(os.path.dirname(output_video), exist_ok=True)
+
+# 누적 결과 저장 경로
+output_image = f"./output_image/{scenario}_output.png"
+os.makedirs(os.path.dirname(output_image), exist_ok=True)
 
 ####################################################################################################################################
 
 # pcd 전처리
-def process_pcd(file_path):
-    # PCD 파일 읽기
-    original_pcd = o3d.io.read_point_cloud(file_path)
-
+def process_pcd(original_pcd):
     # Voxel Downsampling 수행
     voxel_size = 0.2 # 필요에 따라 voxel 크기를 조정하세요.
     downsample_pcd = original_pcd.voxel_down_sample(voxel_size=voxel_size)
@@ -76,6 +83,13 @@ def visualize_with_bounding_boxes(pcd, bounding_boxes, window_name="Filtered Clu
     for bbox in bounding_boxes:
         vis.add_geometry(bbox)
     vis.get_render_option().point_size = point_size
+    vis.poll_events()
+    vis.update_renderer()
+
+    # 결과 저장
+    vis.capture_screen_image(output_image)
+    print(f"Result image saved at {output_image}")
+
     vis.run()
     vis.destroy_window()
 
@@ -100,13 +114,17 @@ prev_pcd = None
 merged_pcd = o3d.geometry.PointCloud()
 clusters = [] 
 all_bbox = []
+curr_bbox = []
 
 
 # pcd 파일 연속적으로 불러오기
-for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
-    curr_pcd = process_pcd(file_path)
-    curr_bbox = []
-    if prev_pcd is not None:
+for idx, pcd in tqdm(enumerate(pcd_list), desc="Processing PCD files"):
+
+    curr_pcd = process_pcd(pcd)
+    if idx%5==0:
+        curr_bbox = []
+
+    if prev_pcd is not None and idx%5==0:
         # 이전 pcd와 비교하여 움직이는 point 탐지
         moving_pcd = get_moving_objects(prev_pcd, curr_pcd, threshold=0.15)
 
@@ -123,33 +141,38 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
             labels = np.array(moving_pcd.cluster_dbscan(eps=0.4, min_points=5, print_progress=False))
 
             # 시각화 결과에서 노이즈 제거
-            valid_indices = labels >= 0
-            if np.sum(valid_indices) == 0:
-                print(f"Frame {idx}: No valid clusters found.")
-                prev_pcd = curr_pcd
-                continue
-            moving_pcd = moving_pcd.select_by_index(np.where(valid_indices)[0])
+            # valid_indices = labels >= 0
+            # if np.sum(valid_indices) == 0:
+            #     print(f"Frame {idx}: No valid clusters found.")
+            #     prev_pcd = curr_pcd
+            #     continue
+            # moving_pcd = moving_pcd.select_by_index(np.where(valid_indices)[0])
 
-            labels = labels[valid_indices]  # 노이즈 제외 후 라벨 갱신
+            # labels = labels[valid_indices]  # 노이즈 제외 후 라벨 갱신
 
             # cluster 개수 계산
             num_cluster = labels.max()+1
             clusters.append(num_cluster)
 
             # 각 cluster에 고유 색상 할당
-            max_label = num_cluster-1
-            cmap = plt.get_cmap("tab20")  
-            colors = np.zeros((len(labels), 3))  # 기본 검정색
-            for i in range(max_label + 1):
-                cluster_color = cmap(i / (max_label if max_label > 0 else 1))[:3]  # RGB 값만 추출
-                colors[labels == i] = cluster_color
+            # max_label = num_cluster-1
+            # cmap = plt.get_cmap("tab20")  
+            # colors = np.zeros((len(labels), 3))  # 기본 검정색
+            # for i in range(max_label + 1):
+            #     cluster_color = cmap(i / (max_label if max_label > 0 else 1))[:3]  # RGB 값만 추출
+            #     colors[labels == i] = cluster_color
+
+            # 노이즈 포인트는 검정색, 클러스터 포인트는 파란색으로 지정
+            colors = np.zeros((len(labels), 3))  # 기본 검정색 (노이즈)
+            colors[labels >= 0] = [0, 0, 1]  # 파란색으로 지정
+
             moving_pcd.colors = o3d.utility.Vector3dVector(colors)
 
             # 통합 PointCloud에 추가
             merged_pcd += moving_pcd
 
             # 필터링 기준 설정
-            min_points_in_cluster = 5   # 클러스터 내 최소 포인트 수
+            min_points_in_cluster = 7   # 클러스터 내 최소 포인트 수
             max_points_in_cluster = 100 # 클러스터 내 최대 포인트 수
             min_z_value = -1.0          # 클러스터 내 최소 Z값
             max_z_value = 4.0           # 클러스터 내 최대 Z값
@@ -190,12 +213,12 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
                                 bbox.color = (1, 0, 0) 
                                 curr_bbox.append(bbox)
                                 all_bbox.append(bbox)
-    save_frame(curr_pcd, all_bbox, idx, output_dir)
+    save_frame(curr_pcd, curr_bbox, idx, output_dir)
     if(idx%5==0):
         prev_pcd = curr_pcd
 
 # 통합 결과 시각화
-# visualize_with_bounding_boxes(merged_pcd, all_bbox, window_name="Moving Objects", point_size=1.5)
+# visualize_with_bounding_boxes(merged_pcd, all_bbox, window_name="Moving Objects", point_size=1.0)
 # print("average number of clusters:",np.mean(clusters))
 
 # 프레임을 동영상으로 변환
