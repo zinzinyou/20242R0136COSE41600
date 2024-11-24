@@ -25,15 +25,15 @@ def process_pcd(file_path):
     original_pcd = o3d.io.read_point_cloud(file_path)
 
     # Voxel Downsampling 수행
-    voxel_size = 0.25 # 필요에 따라 voxel 크기를 조정하세요.
+    voxel_size = 0.2 # 필요에 따라 voxel 크기를 조정하세요.
     downsample_pcd = original_pcd.voxel_down_sample(voxel_size=voxel_size)
 
     # Radius Outlier Removal (ROR) 적용
-    cl, ind = downsample_pcd.remove_radius_outlier(nb_points=6, radius=1.2)
+    cl, ind = downsample_pcd.remove_radius_outlier(nb_points=5, radius=1.0)
     ror_pcd = downsample_pcd.select_by_index(ind)
 
     # RANSAC을 사용하여 평면 추정
-    plane_model, inliers = ror_pcd.segment_plane(distance_threshold=0.1,
+    plane_model, inliers = ror_pcd.segment_plane(distance_threshold=0.05,
                                                 ransac_n=3,
                                                 num_iterations=2000)
 
@@ -59,16 +59,6 @@ def get_moving_objects(pcd_prev, pcd_curr, threshold):
     moving_pcd.points = o3d.utility.Vector3dVector(np.array(moving_points))
     return moving_pcd
 
-
-def dynamic_parameters(moving_pcd, default_eps=0.2, factor=3.5):
-    # 평균 거리 기반 eps 계산
-    if len(moving_pcd.points) > 0:
-        dists = moving_pcd.compute_nearest_neighbor_distance()
-        mean_dist = np.mean(dists)
-        eps = mean_dist * factor
-    else:
-        eps = default_eps
-    return eps
 
 # 포인트 클라우드 및 바운딩 박스를 시각화하는 함수
 def visualize_with_bounding_boxes(pcd, bounding_boxes, window_name="Filtered Clusters and Bounding Boxes", point_size=1.0):
@@ -102,7 +92,7 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
 
     if prev_pcd is not None:
         # 이전 pcd와 비교하여 움직이는 point 탐지
-        moving_pcd = get_moving_objects(prev_pcd, curr_pcd, threshold=0.2)
+        moving_pcd = get_moving_objects(prev_pcd, curr_pcd, threshold=0.15)
 
         # # 포인트 개수 비교
         # total_points = len(curr_pcd.points)
@@ -113,13 +103,7 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
         # print(f"  Moving points: {moving_points} ({moving_ratio:.2f}%)")
 
         if len(moving_pcd.points)>0:
-            # Dynamic Filtering 기반 파라미터 설정
-            eps  = dynamic_parameters(moving_pcd)
-            # print(f"Frame {idx}: Dynamic eps={eps:.3f}")
-
             # 움직이는 point들만 대상으로 DBSCAN 클러스터링 적용
-            # with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
-            # labels = np.array(moving_pcd.cluster_dbscan(eps=eps, min_points=10, print_progress=False))
             labels = np.array(moving_pcd.cluster_dbscan(eps=0.4, min_points=5, print_progress=False))
 
             # 시각화 결과에서 노이즈 제거
@@ -149,7 +133,7 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
 
             # 필터링 기준 설정
             min_points_in_cluster = 5   # 클러스터 내 최소 포인트 수
-            max_points_in_cluster = 100  # 클러스터 내 최대 포인트 수
+            max_points_in_cluster = 100 # 클러스터 내 최대 포인트 수
             min_z_value = -1.0          # 클러스터 내 최소 Z값
             max_z_value = 2.5           # 클러스터 내 최대 Z값
             min_height = 0.4            # Z값 차이의 최소값
@@ -157,10 +141,10 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
             max_distance = 40.0         # 원점으로부터의 최대 거리
 
             # X, Y 필터링 기준 추가
-            min_width = 0.2           # X 최소값
-            max_width = 1.0            # X 최대값
-            min_depth = 0.2           # Y 최소값
-            max_depth = 1.0            # Y 최대값
+            min_width = 0.2             # X값 차이의 최소값
+            max_width = 1.0             # X값 차이의 최대값
+            min_depth = 0.2             # Y값 차이의 최소값
+            max_depth = 1.0             # Y값 차이의 최대값
 
             # 클러스터 필터링 및 바운딩 박스 생성
             for i in range(num_cluster):
