@@ -4,11 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from tqdm import tqdm
+import hdbscan
 
 # pcd 파일 불러오기, 필요에 맞게 경로 수정
 scenario = "01_straight_walk"
-scenario = "02_straight_duck_walk"
-scenario = "03_straight_crawl"
+# scenario = "02_straight_duck_walk"
+# scenario = "03_straight_crawl"
 # scenario = "04_zigzag_walk"
 # scenario = "05_straight_duck_walk"
 # scenario = "06_straight_crawl"
@@ -77,10 +78,6 @@ merged_pcd = o3d.geometry.PointCloud()
 clusters = [] 
 all_bbox = []
 
-min_bbox_xy = np.array([0.2, 0.2])
-max_bbox_xy = np.array([2, 2,])
-
-
 
 # pcd 파일 연속적으로 불러오기
 for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
@@ -113,6 +110,7 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
                 prev_pcd = curr_pcd
                 continue
             moving_pcd = moving_pcd.select_by_index(np.where(valid_indices)[0])
+
             labels = labels[valid_indices]  # 노이즈 제외 후 라벨 갱신
 
             # cluster 개수 계산
@@ -135,10 +133,10 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
             min_points_in_cluster = 5   # 클러스터 내 최소 포인트 수
             max_points_in_cluster = 100 # 클러스터 내 최대 포인트 수
             min_z_value = -1.0          # 클러스터 내 최소 Z값
-            max_z_value = 2.5           # 클러스터 내 최대 Z값
-            min_height = 0.4            # Z값 차이의 최소값
+            max_z_value = 4.0           # 클러스터 내 최대 Z값
+            min_height = 0.3            # Z값 차이의 최소값
             max_height = 2.5            # Z값 차이의 최대값
-            max_distance = 40.0         # 원점으로부터의 최대 거리
+            max_distance = 50.0         # 원점으로부터의 최대 거리
 
             # X, Y 필터링 기준 추가
             min_width = 0.2             # X값 차이의 최소값
@@ -154,7 +152,7 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
                     points = np.asarray(cluster_pcd.points)
                     x_values = points[:,0]
                     y_values = points[:,1]
-                    z_values = points[:, 2]
+                    z_values = points[:,2]
 
                     x_min, x_max = x_values.min(), x_values.max()
                     y_min, y_max = y_values.min(), y_values.max()
