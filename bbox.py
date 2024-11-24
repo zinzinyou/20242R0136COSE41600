@@ -4,7 +4,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from tqdm import tqdm
-import hdbscan
+import cv2
+
+# 시각화 프레임 저장 경로
+output_dir = "./output_frames/"
+os.makedirs(output_dir, exist_ok=True)
+
+# 동영상 저장 경로
+output_video = "./output_video/scenario_video.mp4"
+os.makedirs(os.path.dirname(output_video), exist_ok=True)
 
 # pcd 파일 불러오기, 필요에 맞게 경로 수정
 scenario = "01_straight_walk"
@@ -14,7 +22,6 @@ scenario = "01_straight_walk"
 # scenario = "05_straight_duck_walk"
 # scenario = "06_straight_crawl"
 # scenario = "07_straight_walk"
-
 pcd_dir = f"./data/{scenario}/pcd/"
 pcd_files = sorted([os.path.join(pcd_dir, f) for f in os.listdir(pcd_dir) if f.endswith(".pcd")])
 
@@ -72,6 +79,22 @@ def visualize_with_bounding_boxes(pcd, bounding_boxes, window_name="Filtered Clu
     vis.run()
     vis.destroy_window()
 
+# Open3D 시각화 저장 함수
+def save_frame(pcd, bounding_boxes, frame_id, output_dir):
+    vis = o3d.visualization.Visualizer()
+    vis.create_window(visible=False)  # 창 표시 비활성화
+    vis.add_geometry(pcd)
+    for bbox in bounding_boxes:
+        vis.add_geometry(bbox)
+    vis.get_render_option().point_size = 1.0
+    vis.poll_events()
+    vis.update_renderer()
+
+    # 프레임 저장
+    frame_path = os.path.join(output_dir, f"frame_{frame_id:04d}.png")
+    vis.capture_screen_image(frame_path, do_render=True)
+    vis.destroy_window()
+
 ####################################################################################################################################
 prev_pcd = None
 merged_pcd = o3d.geometry.PointCloud()
@@ -81,12 +104,8 @@ all_bbox = []
 
 # pcd 파일 연속적으로 불러오기
 for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
-    # if idx>10: break
-
-    if idx%5!=0: # 5 frame마다 연산 [efficient]
-        continue
     curr_pcd = process_pcd(file_path)
-
+    curr_bbox = []
     if prev_pcd is not None:
         # 이전 pcd와 비교하여 움직이는 point 탐지
         moving_pcd = get_moving_objects(prev_pcd, curr_pcd, threshold=0.15)
@@ -98,7 +117,7 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
         # print(f"Frame {idx}:")
         # print(f"  Total points: {total_points}")
         # print(f"  Moving points: {moving_points} ({moving_ratio:.2f}%)")
-
+        
         if len(moving_pcd.points)>0:
             # 움직이는 point들만 대상으로 DBSCAN 클러스터링 적용
             labels = np.array(moving_pcd.cluster_dbscan(eps=0.4, min_points=5, print_progress=False))
@@ -169,10 +188,24 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
                             if distances.max() <= max_distance:
                                 bbox = cluster_pcd.get_axis_aligned_bounding_box()
                                 bbox.color = (1, 0, 0) 
+                                curr_bbox.append(bbox)
                                 all_bbox.append(bbox)
-
-    prev_pcd = curr_pcd
+    save_frame(curr_pcd, all_bbox, idx, output_dir)
+    if(idx%5==0):
+        prev_pcd = curr_pcd
 
 # 통합 결과 시각화
-visualize_with_bounding_boxes(merged_pcd, all_bbox, window_name="Moving Objects", point_size=1.5)
-print("average number of clusters:",np.mean(clusters))
+# visualize_with_bounding_boxes(merged_pcd, all_bbox, window_name="Moving Objects", point_size=1.5)
+# print("average number of clusters:",np.mean(clusters))
+
+# 프레임을 동영상으로 변환
+frame_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith(".png")])
+frame_size = cv2.imread(frame_files[0]).shape[1::-1]
+out = cv2.VideoWriter(output_video, cv2.VideoWriter_fourcc(*'mp4v'), 10, frame_size)
+
+for frame_file in tqdm(frame_files, desc="Creating Video"):
+    frame = cv2.imread(frame_file)
+    out.write(frame)
+
+out.release()
+print(f"Video saved at {output_video}")
