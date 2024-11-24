@@ -9,7 +9,10 @@ from tqdm import tqdm
 scenario = "01_straight_walk"
 # scenario = "02_straight_duck_walk"
 # scenario = "03_straight_crawl"
-scenario = "04_zigzag_walk"
+# scenario = "04_zigzag_walk"
+# scenario = "05_straight_duck_walk"
+# scenario = "06_straight_crawl"
+# scenario = "07_straight_walk"
 
 pcd_dir = f"./data/{scenario}/pcd/"
 pcd_files = sorted([os.path.join(pcd_dir, f) for f in os.listdir(pcd_dir) if f.endswith(".pcd")])
@@ -57,7 +60,6 @@ def get_moving_objects(pcd_prev, pcd_curr, threshold):
     return moving_pcd
 
 
-
 # 포인트 클라우드 및 바운딩 박스를 시각화하는 함수
 def visualize_with_bounding_boxes(pcd, bounding_boxes, window_name="Filtered Clusters and Bounding Boxes", point_size=1.0):
     vis = o3d.visualization.Visualizer()
@@ -72,33 +74,46 @@ def visualize_with_bounding_boxes(pcd, bounding_boxes, window_name="Filtered Clu
 ####################################################################################################################################
 prev_pcd = None
 merged_pcd = o3d.geometry.PointCloud()
-clusters = [] # cluster 개수
+clusters = [] 
 all_bbox = []
 
 
 # pcd 파일 연속적으로 불러오기
 for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
     # if idx>10: break
-    if idx%5!=0:
-        continue
 
+    if idx%5!=0: # 5 frame마다 연산 [efficient]
+        continue
     curr_pcd = process_pcd(file_path)
 
     if prev_pcd is not None:
-        # 움직이는 객체 탐지
-        # moving_pcd = get_moving_objects(prev_pcd, curr_pcd, threshold=0.2)
+        # 이전 pcd와 비교하여 움직이는 point 탐지
         moving_pcd = get_moving_objects(prev_pcd, curr_pcd, threshold=0.2)
 
-        # DBSCAN 클러스터링 적용
+        # 포인트 개수 비교
+        total_points = len(curr_pcd.points)
+        moving_points = len(moving_pcd.points)
+        moving_ratio = (moving_points / total_points) * 100 if total_points > 0 else 0
+        print(f"Frame {idx}:")
+        print(f"  Total points: {total_points}")
+        print(f"  Moving points: {moving_points} ({moving_ratio:.2f}%)")
+
         if len(moving_pcd.points)>0:
+            # 움직이는 point들을 대상으로 DBSCAN 클러스터링 적용
             # with o3d.utility.VerbosityContextManager(o3d.utility.VerbosityLevel.Debug) as cm:
             labels = np.array(moving_pcd.cluster_dbscan(eps=0.35, min_points=10, print_progress=False))
+
             num_cluster = labels.max()+1
             clusters.append(num_cluster)
 
-            # 노이즈 포인트는 검정색, 클러스터 포인트는 파란색으로 지정
-            colors = np.zeros((len(labels), 3))  # 기본 검정색 (노이즈)
-            colors[labels >= 0] = [0, 0, 1]  # 파란색으로 지정
+            # 각 cluster에 고유 색상 할당
+            max_label = labels.max()
+            cmap = plt.get_cmap("tab20")  
+            colors = np.zeros((len(labels), 3))  # 기본 검정색
+            for i in range(max_label + 1):
+                cluster_color = cmap(i / (max_label if max_label > 0 else 1))[:3]  # RGB 값만 추출
+                colors[labels == i] = cluster_color
+            colors[labels < 0] = [0, 0, 0]  # 노이즈는 검정색
 
             moving_pcd.colors = o3d.utility.Vector3dVector(colors)
 
@@ -115,7 +130,6 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
             max_distance = 50.0         # 원점으로부터의 최대 거리
 
             # 1번, 2번, 3번 조건을 모두 만족하는 클러스터 필터링 및 바운딩 박스 생성
-            # bboxes_1234 = []
             for i in range(labels.max() + 1):
                 cluster_indices = np.where(labels == i)[0]
                 if min_points_in_cluster <= len(cluster_indices) <= max_points_in_cluster:
@@ -131,15 +145,11 @@ for idx, file_path in tqdm(enumerate(pcd_files), desc="Processing PCD files"):
                             if distances.max() <= max_distance:
                                 bbox = cluster_pcd.get_axis_aligned_bounding_box()
                                 bbox.color = (1, 0, 0) 
-                                # bboxes_1234.append(bbox)
                                 all_bbox.append(bbox)
 
-        # 시각화 (포인트 크기를 원하는 크기로 조절 가능)
-        # visualize_with_bounding_boxes(moving_pcd, bboxes_1234, point_size=2.0)
-    
     prev_pcd = curr_pcd
 
 # 통합 결과 시각화
-visualize_with_bounding_boxes(merged_pcd, all_bbox, window_name="Merged Clusters with Bounding Boxes", point_size=1.0)
+visualize_with_bounding_boxes(merged_pcd, all_bbox, window_name="Moving Objects", point_size=1.5)
 # o3d.visualization.draw_geometries([merged_pcd], window_name="Merged Clusters")
 print("average number of clusters:",np.mean(clusters))
