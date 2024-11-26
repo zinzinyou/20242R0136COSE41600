@@ -6,6 +6,8 @@ import os
 from tqdm import tqdm
 import cv2
 
+# video 만들지 여부 
+generate_video = False
 
 # pcd 파일 불러오기, 필요에 맞게 경로 수정
 scenario = "01_straight_walk"
@@ -21,7 +23,6 @@ pcd_files = sorted([os.path.join(pcd_dir, f) for f in os.listdir(pcd_dir) if f.e
 # 모든 PCD 파일 로드
 print("Loading PCD files...")
 pcd_list = [o3d.io.read_point_cloud(file) for file in tqdm(pcd_files)]
-
 
 # 시각화 프레임 저장 경로
 output_dir = f"./output_frames/{scenario}/"
@@ -128,7 +129,7 @@ for idx, pcd in tqdm(enumerate(pcd_list), desc="Processing PCD files"):
         # 이전 pcd와 비교하여 움직이는 point 탐지
         moving_pcd = get_moving_objects(prev_pcd, curr_pcd, threshold=0.15)
 
-        # # 포인트 개수 비교
+        # 움직이는 포인트의 비율
         # total_points = len(curr_pcd.points)
         # moving_points = len(moving_pcd.points)
         # moving_ratio = (moving_points / total_points) * 100 if total_points > 0 else 0
@@ -140,6 +141,10 @@ for idx, pcd in tqdm(enumerate(pcd_list), desc="Processing PCD files"):
             # 움직이는 point들만 대상으로 DBSCAN 클러스터링 적용
             labels = np.array(moving_pcd.cluster_dbscan(eps=0.4, min_points=5, print_progress=False))
 
+            # cluster 개수 계산
+            num_cluster = labels.max()+1
+            clusters.append(num_cluster)
+
             # 시각화 결과에서 노이즈 제거
             # valid_indices = labels >= 0
             # if np.sum(valid_indices) == 0:
@@ -149,10 +154,6 @@ for idx, pcd in tqdm(enumerate(pcd_list), desc="Processing PCD files"):
             # moving_pcd = moving_pcd.select_by_index(np.where(valid_indices)[0])
 
             # labels = labels[valid_indices]  # 노이즈 제외 후 라벨 갱신
-
-            # cluster 개수 계산
-            num_cluster = labels.max()+1
-            clusters.append(num_cluster)
 
             # 각 cluster에 고유 색상 할당
             # max_label = num_cluster-1
@@ -213,22 +214,25 @@ for idx, pcd in tqdm(enumerate(pcd_list), desc="Processing PCD files"):
                                 bbox.color = (1, 0, 0) 
                                 curr_bbox.append(bbox)
                                 all_bbox.append(bbox)
-    save_frame(curr_pcd, curr_bbox, idx, output_dir)
+    if generate_video:
+        save_frame(curr_pcd, curr_bbox, idx, output_dir)
     if(idx%5==0):
         prev_pcd = curr_pcd
 
+print("average number of clusters:",np.mean(clusters))
+
 # 통합 결과 시각화
-# visualize_with_bounding_boxes(merged_pcd, all_bbox, window_name="Moving Objects", point_size=1.0)
-# print("average number of clusters:",np.mean(clusters))
+visualize_with_bounding_boxes(merged_pcd, all_bbox, window_name="Moving Objects", point_size=1.0)
 
 # 프레임을 동영상으로 변환
-frame_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith(".png")])
-frame_size = cv2.imread(frame_files[0]).shape[1::-1]
-out = cv2.VideoWriter(output_video, cv2.VideoWriter_fourcc(*'mp4v'), 10, frame_size)
+if generate_video:
+    frame_files = sorted([os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith(".png")])
+    frame_size = cv2.imread(frame_files[0]).shape[1::-1]
+    out = cv2.VideoWriter(output_video, cv2.VideoWriter_fourcc(*'mp4v'), 10, frame_size)
 
-for frame_file in tqdm(frame_files, desc="Creating Video"):
-    frame = cv2.imread(frame_file)
-    out.write(frame)
+    for frame_file in tqdm(frame_files, desc="Creating Video"):
+        frame = cv2.imread(frame_file)
+        out.write(frame)
 
-out.release()
-print(f"Video saved at {output_video}")
+    out.release()
+    print(f"Video saved at {output_video}")
